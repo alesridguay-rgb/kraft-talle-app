@@ -19,9 +19,11 @@
   .btn{appearance:none;border:none;background:var(--amarillo);color:#000;font-weight:800;padding:14px;border-radius:10px;cursor:pointer;font-size:15px;width:100%}
   .btn.ghost{background:#222;color:#fff;border:1px solid var(--linea)}
   .btn:disabled{opacity:.4}
-  .estado{font-size:13px;color:var(--gris2);text-align:center;margin:8px 0}
-  .vista{position:relative;width:100%;background:#000;border-radius:10px;overflow:hidden;min-height:200px;display:flex;justify-content:center;align-items:center}
+  .estado{font-size:13px;color:var(--gris2);text-align:center;margin:8px 0;min-height:18px}
+  .vista{position:relative;width:100%;background:#000;border-radius:10px;overflow:hidden;min-height:180px;display:flex;justify-content:center;align-items:center}
   video,canvas{max-width:100%;display:block}
+  .barra{height:6px;background:#222;border-radius:3px;overflow:hidden;margin-top:8px}
+  .barra i{display:block;height:100%;width:0;background:var(--ok);transition:width .12s}
   .resultado{display:flex;gap:10px;margin-top:6px}
   .metrica{flex:1;background:#000;border:1px solid var(--linea);border-radius:10px;padding:12px;text-align:center}
   .metrica .val{font-size:26px;font-weight:800}
@@ -34,180 +36,178 @@
   .cal{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;margin-top:12px}
   .cal input{width:64px;background:#000;border:1px solid var(--linea);color:#fff;border-radius:6px;padding:6px;text-align:center}
   .factor{color:var(--ok);font-weight:700}
-  .nota{font-size:12px;color:var(--gris2);line-height:1.5;margin-top:10px}
 </style>
 </head>
 <body>
 <header>
   <div class="marca">KRAFT <span>TALLE</span></div>
-  <div class="v">cámara · v1</div>
+  <div class="v">cámara · v2</div>
 </header>
 
 <div class="wrap">
-
   <div class="card">
     <ol class="pasos">
-      <li>Hoja <b>A4 pegada al piso contra una pared</b> (lado corto contra la pared).</li>
-      <li>Parate con el <b>talón contra la pared</b>, el pie sobre la hoja.</li>
-      <li>Apuntá la cámara <b>desde arriba</b>. Cuando el contorno del folio se pinte de amarillo, tocá <b>Capturar</b>.</li>
+      <li>Hoja <b>A4 contra una pared</b>, lado corto tocando la pared.</li>
+      <li><b>Talón contra la pared</b>, pie sobre la hoja.</li>
+      <li>Cámara <b>desde arriba</b>. Mantené quieto hasta que la barra se llene: captura sola.</li>
     </ol>
   </div>
 
   <div class="card">
-    <div class="vista" id="vista">
-      <video id="video" playsinline autoplay muted></video>
-      <canvas id="live" style="display:none"></canvas>
+    <div class="vista">
+      <video id="video" playsinline autoplay muted style="display:none"></video>
+      <canvas id="live"></canvas>
     </div>
     <div class="estado" id="estado">Cargando motor de visión…</div>
-    <button class="btn" id="encender" disabled>Encender cámara</button>
-    <button class="btn" id="capturar" style="display:none;margin-top:10px">Capturar y medir</button>
+    <div class="barra"><i id="lock"></i></div>
+    <button class="btn" id="encender" disabled style="margin-top:10px">Encender cámara</button>
+    <button class="btn ghost" id="capturar" style="display:none;margin-top:10px">Capturar ahora</button>
   </div>
 
   <div class="card" id="cardRes" style="display:none">
     <div class="vista"><canvas id="rect"></canvas></div>
-    <div class="slider">
-      <span>Umbral pie</span>
-      <input type="range" id="umbral" min="60" max="200" value="120">
-      <span id="umbralVal">120</span>
-    </div>
+    <div class="slider"><span>Ajuste pie</span><input type="range" id="umbral" min="-60" max="60" value="0"><span id="umbralVal">auto</span></div>
     <div class="resultado">
       <div class="metrica"><div class="val" id="mLargo">–<small> mm</small></div><div class="lab">Largo</div></div>
       <div class="metrica"><div class="val" id="mAncho">–<small> mm</small></div><div class="lab">Ancho</div></div>
       <div class="metrica talla"><div class="val" id="mTalla">–</div><div class="lab">Talla</div></div>
     </div>
     <div class="cal">
-      <span>Calibrar: mi pie mide</span>
-      <input type="number" id="pieReal" placeholder="mm">
-      <span>mm</span>
-      <button class="btn ghost" id="calibrar" style="width:auto;padding:8px 12px">Ajustar</button>
+      <span>Mi pie mide</span><input type="number" id="pieReal" placeholder="mm"><span>mm</span>
+      <button class="btn ghost" id="calibrar" style="width:auto;padding:8px 12px">Calibrar</button>
       <span class="factor" id="factorTxt"></span>
     </div>
     <button class="btn ghost" id="otra" style="margin-top:12px">Medir otra vez</button>
-    <div class="nota">El pie se detecta por contraste sobre el folio blanco (aproximado: la pierna y las sombras pueden meter ruido). Ajustá el umbral hasta que el tinte cubra el pie. La detección automática fina viene con el modelo entrenado.</div>
   </div>
-
 </div>
 
-<script async src="https://docs.opencv.org/4.7.0/opencv.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/ColonelParrot/jscanify@master/src/jscanify.min.js"></script>
+<script async src="https://docs.opencv.org/4.10.0/opencv.js"></script>
 <script>
 (function(){
-  var SCALE=2, PW=210*SCALE, PH=297*SCALE; // A4 vertical rectificado
-  var video=document.getElementById('video'), live=document.getElementById('live');
+  var SCALE=2, A4=210/297;
+  var video=document.getElementById('video'), live=document.getElementById('live'), lctx=live.getContext('2d');
   var rect=document.getElementById('rect'), rctx=rect.getContext('2d');
   var grab=document.createElement('canvas'), gctx=grab.getContext('2d');
-  var scanner=null, stream=null, streaming=false, loopT=null;
-  var factorCal=1, rawLargo=0, tallas;
+  var streaming=false, loopT=null, lastQuad=null, stable=0, NEED=6;
+  var factorCal=1, rawLargo=0, otsuVal=0, warpMat=null, tallas;
 
-  function setEstado(t){ document.getElementById('estado').textContent=t; }
+  function est(t){ document.getElementById('estado').textContent=t; }
+  function dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+  function ordenar(p){ var s=p.slice().sort(function(a,b){return (a.x+a.y)-(b.x+b.y);}); var d=p.slice().sort(function(a,b){return (a.y-a.x)-(b.y-b.x);}); return [s[0],d[0],s[3],d[3]]; }
 
-  // esperar OpenCV + jscanify
-  function cvListo(){ return window.cv && window.cv.Mat; }
-  function esperar(){
-    if(cvListo() && window.jscanify){
-      scanner=new jscanify();
-      setEstado('Listo. Tocá “Encender cámara”.');
-      document.getElementById('encender').disabled=false;
-    } else if(window.cv && typeof window.cv.then==='function'){
-      window.cv.then(function(c){ window.cv=c; esperar(); });
-    } else { setTimeout(esperar,200); }
-  }
-  esperar();
+  function listo(){ if(window.cv && cv.Mat){ est('Listo. Tocá “Encender cámara”.'); document.getElementById('encender').disabled=false; }
+    else if(window.cv && typeof window.cv.then==='function'){ window.cv.then(function(c){window.cv=c; listo();}); }
+    else setTimeout(listo,200); }
+  listo();
 
-  // cámara
   document.getElementById('encender').addEventListener('click',function(){
     navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false})
-      .then(function(s){
-        stream=s; video.srcObject=s; streaming=true;
+      .then(function(s){ video.srcObject=s; streaming=true;
         document.getElementById('encender').style.display='none';
         document.getElementById('capturar').style.display='block';
-        video.style.display='none'; live.style.display='block';
-        setEstado('Buscando el folio… ponelo en cuadro.');
-        loop();
-      })
-      .catch(function(){ setEstado('No pude acceder a la cámara. Revisá permisos y que sea HTTPS.'); });
+        est('Buscando el folio…'); loop(); })
+      .catch(function(){ est('Sin acceso a la cámara. Revisá permisos y que sea HTTPS.'); });
   });
+
+  // detección de A4 con OpenCV (bordes + contornos + filtro de forma)
+  function detectar(){
+    var src=cv.imread(grab), gray=new cv.Mat(), edges=new cv.Mat(), k=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(5,5));
+    cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY); cv.GaussianBlur(gray,gray,new cv.Size(5,5),0);
+    cv.Canny(gray,edges,40,120); cv.dilate(edges,edges,k);
+    var cont=new cv.MatVector(), hier=new cv.Mat();
+    cv.findContours(edges,cont,hier,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
+    var area0=src.rows*src.cols, best=null, bestScore=0;
+    for(var i=0;i<cont.size();i++){
+      var c=cont.get(i), a=cv.contourArea(c);
+      if(a<area0*0.07){ c.delete(); continue; }
+      var ap=new cv.Mat(); cv.approxPolyDP(c,ap,0.02*cv.arcLength(c,true),true);
+      if(ap.rows===4 && cv.isContourConvex(ap)){
+        var pts=[]; for(var j=0;j<4;j++) pts.push({x:ap.data32S[j*2],y:ap.data32S[j*2+1]});
+        var o=ordenar(pts), w=(dist(o[0],o[1])+dist(o[3],o[2]))/2, h=(dist(o[0],o[3])+dist(o[1],o[2]))/2;
+        var r=Math.min(w,h)/Math.max(w,h), rs=1-Math.min(1,Math.abs(r-A4)/0.45);
+        if(rs>0.45){ var sc=(a/area0)*(0.4+0.6*rs); if(sc>bestScore){ bestScore=sc; best=o; } }
+      }
+      ap.delete(); c.delete();
+    }
+    src.delete(); gray.delete(); edges.delete(); hier.delete(); cont.delete(); k.delete();
+    return best;
+  }
 
   function loop(){
     if(!streaming) return;
     var vw=video.videoWidth, vh=video.videoHeight;
     if(vw){
-      var max=900, s=Math.min(1,max/Math.max(vw,vh));
-      grab.width=Math.round(vw*s); grab.height=Math.round(vh*s);
+      var s=Math.min(1,900/Math.max(vw,vh)); grab.width=Math.round(vw*s); grab.height=Math.round(vh*s);
       gctx.drawImage(video,0,0,grab.width,grab.height);
-      try{
-        var hl=scanner.highlightPaper(grab,{color:'#F5C400',thickness:6});
-        live.width=hl.width; live.height=hl.height;
-        live.getContext('2d').drawImage(hl,0,0);
-        setEstado('Folio detectado ✓ — tocá Capturar');
-      }catch(e){
-        live.width=grab.width; live.height=grab.height;
-        live.getContext('2d').drawImage(grab,0,0);
-        setEstado('Buscando el folio… acercá o mejorá la luz');
-      }
+      live.width=grab.width; live.height=grab.height; lctx.drawImage(grab,0,0);
+      var q=null; try{ q=detectar(); }catch(e){}
+      if(q){
+        // suavizado + estabilidad
+        if(lastQuad){ var mov=0; for(var i=0;i<4;i++) mov+=dist(q[i],lastQuad[i]); mov/=4;
+          for(var j=0;j<4;j++){ q[j].x=q[j].x*0.5+lastQuad[j].x*0.5; q[j].y=q[j].y*0.5+lastQuad[j].y*0.5; }
+          if(mov < grab.width*0.02) stable++; else stable=0;
+        } else stable=0;
+        lastQuad=q;
+        lctx.beginPath(); lctx.moveTo(q[0].x,q[0].y); for(var m=1;m<4;m++) lctx.lineTo(q[m].x,q[m].y); lctx.closePath();
+        lctx.lineWidth=4; lctx.strokeStyle= stable>=NEED?'#2ec27e':'#F5C400'; lctx.stroke();
+        document.getElementById('lock').style.width=Math.min(100,(stable/NEED)*100)+'%';
+        est(stable>=NEED?'Capturando…':'Folio detectado ✓ — mantené quieto');
+        if(stable>=NEED){ capturar(); return; }
+      } else { lastQuad=null; stable=0; document.getElementById('lock').style.width='0%'; est('Buscando el folio… acercá / mejorá luz'); }
     }
-    loopT=setTimeout(loop,220);
+    loopT=setTimeout(loop,160);
   }
 
-  // capturar y medir
-  document.getElementById('capturar').addEventListener('click',function(){
-    var vw=video.videoWidth; if(!vw){ return; }
-    gctx.drawImage(video,0,0,grab.width,grab.height);
-    var ext;
-    try{ ext=scanner.extractPaper(grab,PW,PH); }
-    catch(e){ setEstado('No encontré el folio. Reintentá.'); return; }
+  document.getElementById('capturar').addEventListener('click',function(){ if(lastQuad) capturar(); });
+
+  function capturar(){
     streaming=false; clearTimeout(loopT);
-    rect.width=PW; rect.height=PH; rctx.drawImage(ext,0,0);
-    warp=rctx.getImageData(0,0,PW,PH);
+    var o=lastQuad, w=(dist(o[0],o[1])+dist(o[3],o[2]))/2, h=(dist(o[0],o[3])+dist(o[1],o[2]))/2;
+    var PW,PH; if(w>=h){ PW=Math.round(297*SCALE); PH=Math.round(210*SCALE); } else { PW=Math.round(210*SCALE); PH=Math.round(297*SCALE); }
+    var src=cv.imread(grab);
+    var st=cv.matFromArray(4,1,cv.CV_32FC2,[o[0].x,o[0].y,o[1].x,o[1].y,o[2].x,o[2].y,o[3].x,o[3].y]);
+    var dt=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,PW,0,PW,PH,0,PH]);
+    var M=cv.getPerspectiveTransform(st,dt); if(warpMat) warpMat.delete(); warpMat=new cv.Mat();
+    cv.warpPerspective(src,warpMat,M,new cv.Size(PW,PH));
+    rect.width=PW; rect.height=PH;
+    // Otsu de referencia
+    var g=new cv.Mat(); cv.cvtColor(warpMat,g,cv.COLOR_RGBA2GRAY);
+    var tmp=new cv.Mat(); otsuVal=cv.threshold(g,tmp,0,255,cv.THRESH_BINARY+cv.THRESH_OTSU); g.delete(); tmp.delete();
+    src.delete(); st.delete(); dt.delete(); M.delete();
     document.getElementById('cardRes').style.display='block';
     document.getElementById('cardRes').scrollIntoView({behavior:'smooth'});
+    document.getElementById('umbral').value=0; document.getElementById('umbralVal').textContent='auto';
     medir();
-  });
-  document.getElementById('otra').addEventListener('click',function(){
-    document.getElementById('cardRes').style.display='none';
-    streaming=true; loop();
-    document.getElementById('video').scrollIntoView({behavior:'smooth'});
-  });
+  }
 
-  // medición por umbral + truco de pared
-  var warp=null;
-  document.getElementById('umbral').addEventListener('input',function(e){ document.getElementById('umbralVal').textContent=e.target.value; medir(); });
+  document.getElementById('umbral').addEventListener('input',function(e){ document.getElementById('umbralVal').textContent=(+e.target.value===0?'auto':e.target.value); medir(); });
+
   function medir(){
-    if(!warp) return;
-    var T=+document.getElementById('umbral').value, d=warp.data;
-    var out=rctx.createImageData(PW,PH), od=out.data;
-    var mar=Math.round(PW*0.04), minY=PH,maxY=0, rowMin=new Int16Array(PH).fill(-1), rowMax=new Int16Array(PH).fill(-1), cnt=0;
-    for(var Y=0;Y<PH;Y++)for(var X=0;X<PW;X++){
-      var o=(Y*PW+X)*4, g=0.299*d[o]+0.587*d[o+1]+0.114*d[o+2];
-      od[o]=d[o];od[o+1]=d[o+1];od[o+2]=d[o+2];od[o+3]=255;
-      if(g<T && X>mar && X<PW-mar && Y>mar && Y<PH-mar){
-        od[o]=245;od[o+1]=196;od[o+2]=0; cnt++;
-        if(Y<minY)minY=Y; if(Y>maxY)maxY=Y;
-        if(rowMin[Y]<0)rowMin[Y]=X; rowMax[Y]=X;
-      }
-    }
-    rctx.putImageData(out,0,0);
-    if(cnt<PW*PH*0.01){ set('–','–','–'); return; }
-    var largo=(maxY-minY)/SCALE; // talón en la pared = extremo; punta = otro extremo
-    var anchoPx=0; for(var y=minY;y<=maxY;y++){ if(rowMin[y]>=0){ var w=rowMax[y]-rowMin[y]; if(w>anchoPx)anchoPx=w; } }
-    var ancho=anchoPx/SCALE;
-    rawLargo=largo;
-    set((largo*factorCal).toFixed(0), ancho.toFixed(0), tallaPara(largo*factorCal));
+    if(!warpMat) return;
+    var off=+document.getElementById('umbral').value, T=Math.max(1,Math.min(254,otsuVal+off));
+    var g=new cv.Mat(); cv.cvtColor(warpMat,g,cv.COLOR_RGBA2GRAY);
+    var bin=new cv.Mat(); cv.threshold(g,bin,T,255,cv.THRESH_BINARY_INV); // pie oscuro = blanco
+    var k=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(5,5)); cv.morphologyEx(bin,bin,cv.MORPH_OPEN,k);
+    var lab=new cv.Mat(), stats=new cv.Mat(), cen=new cv.Mat();
+    var n=cv.connectedComponentsWithStats(bin,lab,stats,cen);
+    var bi=0,ba=0; for(var i=1;i<n;i++){ var a=stats.intAt(i,cv.CC_STAT_AREA); if(a>ba){ba=a;bi=i;} }
+    // overlay
+    var disp=warpMat.clone();
+    if(bi>0){
+      var x=stats.intAt(bi,cv.CC_STAT_LEFT), y=stats.intAt(bi,cv.CC_STAT_TOP), w=stats.intAt(bi,cv.CC_STAT_WIDTH), h=stats.intAt(bi,cv.CC_STAT_HEIGHT);
+      // tinte
+      for(var yy=0;yy<disp.rows;yy++) for(var xx=0;xx<disp.cols;xx++){ if(lab.intAt(yy,xx)===bi){ var p=(yy*disp.cols+xx)*4; disp.data[p]=245;disp.data[p+1]=196;disp.data[p+2]=0; } }
+      cv.imshow(rect,disp);
+      var largo=Math.max(w,h)/SCALE, ancho=Math.min(w,h)/SCALE; rawLargo=largo;
+      set((largo*factorCal).toFixed(0),(ancho*factorCal).toFixed(0),tallaPara(largo*factorCal));
+    } else { cv.imshow(rect,disp); set('–','–','–'); }
+    disp.delete(); g.delete(); bin.delete(); k.delete(); lab.delete(); stats.delete(); cen.delete();
   }
-  function set(l,a,t){
-    document.getElementById('mLargo').innerHTML=l+(l==='–'?'':'<small> mm</small>');
-    document.getElementById('mAncho').innerHTML=a+(a==='–'?'':'<small> mm</small>');
-    document.getElementById('mTalla').textContent=t;
-  }
+  function set(l,a,t){ document.getElementById('mLargo').innerHTML=l+(l==='–'?'':'<small> mm</small>'); document.getElementById('mAncho').innerHTML=a+(a==='–'?'':'<small> mm</small>'); document.getElementById('mTalla').textContent=t; }
 
-  // calibración
-  document.getElementById('calibrar').addEventListener('click',function(){
-    var real=+document.getElementById('pieReal').value;
-    if(!real||!rawLargo){ alert('Capturá primero y poné tu medida real.'); return; }
-    factorCal=real/rawLargo; document.getElementById('factorTxt').textContent='×'+factorCal.toFixed(3); medir();
-  });
+  document.getElementById('otra').addEventListener('click',function(){ document.getElementById('cardRes').style.display='none'; lastQuad=null; stable=0; streaming=true; loop(); window.scrollTo({top:0,behavior:'smooth'}); });
+  document.getElementById('calibrar').addEventListener('click',function(){ var r=+document.getElementById('pieReal').value; if(!r||!rawLargo){alert('Capturá primero.');return;} factorCal=r/rawLargo; document.getElementById('factorTxt').textContent='×'+factorCal.toFixed(3); medir(); });
 
-  // tabla EU
   tallas=[[228,234,'36'],[234,240,'37'],[240,247,'38'],[247,253,'39'],[253,260,'40'],[260,266,'41'],[266,273,'42'],[273,280,'43'],[280,286,'44'],[286,293,'45'],[293,299,'46'],[299,306,'47']];
   function tallaPara(mm){ for(var i=0;i<tallas.length;i++){ if(mm>=tallas[i][0]&&mm<tallas[i][1]) return tallas[i][2]; } return '?'; }
 })();
