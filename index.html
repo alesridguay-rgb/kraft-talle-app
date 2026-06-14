@@ -81,7 +81,6 @@
   </div>
 </div>
 
-<script async src="https://docs.opencv.org/4.10.0/opencv.js"></script>
 <script>
 (function(){
   var SCALE=2, A4=210/297;
@@ -95,10 +94,10 @@
   function dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
   function ordenar(p){ var s=p.slice().sort(function(a,b){return (a.x+a.y)-(b.x+b.y);}); var d=p.slice().sort(function(a,b){return (a.y-a.x)-(b.y-b.x);}); return [s[0],d[0],s[3],d[3]]; }
 
-  function listo(){ if(window.cv && cv.Mat){ est('Listo. Tocá “Encender cámara”.'); document.getElementById('encender').disabled=false; }
-    else if(window.cv && typeof window.cv.then==='function'){ window.cv.then(function(c){window.cv=c; listo();}); }
-    else setTimeout(listo,200); }
-  listo();
+  // El loader de OpenCV (script de abajo) llama a este hook cuando cv.Mat está disponible.
+  window.__onOpenCvReady = function(){ document.getElementById('encender').disabled=false; };
+  // Por si OpenCV ya quedó listo antes de registrar el hook.
+  if(window.cv && window.cv.Mat){ window.__onOpenCvReady(); }
 
   document.getElementById('encender').addEventListener('click',function(){
     navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false})
@@ -210,6 +209,108 @@
 
   tallas=[[228,234,'36'],[234,240,'37'],[240,247,'38'],[247,253,'39'],[253,260,'40'],[260,266,'41'],[266,273,'42'],[273,280,'43'],[280,286,'44'],[286,293,'45'],[293,299,'46'],[299,306,'47']];
   function tallaPara(mm){ for(var i=0;i<tallas.length;i++){ if(mm>=tallas[i][0]&&mm<tallas[i][1]) return tallas[i][2]; } return '?'; }
+})();
+</script>
+
+<!-- Loader robusto de OpenCV.js: Module.onRuntimeInitialized + fallback de CDN + timeout + reintento -->
+<script>
+(function(){
+  var estadoEl = document.getElementById('estado');
+  function setStatus(html, isError){
+    if(!estadoEl) return;
+    estadoEl.style.color = isError ? '#ff6b6b' : '';
+    estadoEl.textContent = html;
+  }
+
+  var SOURCES = [
+    { url:'https://docs.opencv.org/4.10.0/opencv.js',                              name:'docs.opencv.org' },
+    { url:'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0/dist/opencv.js', name:'jsDelivr (alternativo)' }
+  ];
+  var TIMEOUT_MS = 20000;
+  var idx = 0, done = false, failed = false, deadline = null, curScript = null;
+
+  // Hook oficial de Emscripten: DEBE existir antes de que opencv.js se ejecute.
+  function armHook(){ window.Module = { onRuntimeInitialized: onRuntimeInit }; }
+  function onRuntimeInit(){ if(done||failed) return; setStatus('inicializando…'); resolveCv(); }
+
+  // Builds recientes (p.ej. techstark) exponen cv como Promise.
+  function resolveCv(){
+    if(window.cv && typeof window.cv.then === 'function'){
+      window.cv.then(function(c){ window.cv = c; checkReady(); },
+                     function(){ nextOrFail('No se pudo inicializar OpenCV.'); });
+    } else { checkReady(); }
+  }
+
+  function checkReady(){
+    if(done||failed) return;
+    if(window.cv && window.cv.Mat){
+      done = true; clearDeadline();
+      setStatus('Listo. Tocá “Encender cámara”.');
+      if(typeof window.__onOpenCvReady === 'function') window.__onOpenCvReady();
+    } else {
+      setStatus('inicializando…');
+      setTimeout(checkReady, 100);
+    }
+  }
+
+  function clearDeadline(){ if(deadline){ clearTimeout(deadline); deadline = null; } }
+
+  function loadCurrent(){
+    if(curScript && curScript.parentNode) curScript.parentNode.removeChild(curScript);
+    armHook(); // re-armamos el hook para este build
+    var srcobj = SOURCES[idx];
+    setStatus('descargando OpenCV… (' + srcobj.name + ')');
+    var s = document.createElement('script');
+    s.src = srcobj.url;
+    s.async = false;                 // NO async
+    s.onload = function(){
+      // Para builds tipo Promise (techstark) onRuntimeInitialized no se dispara: resolvemos manual.
+      if(window.cv && typeof window.cv.then === 'function'){ onRuntimeInit(); }
+      // Para el build oficial, onRuntimeInitialized se encargará.
+    };
+    s.onerror = function(){ nextOrFail('No se pudo descargar OpenCV desde ' + srcobj.name + '.'); };
+    curScript = s;
+    document.head.appendChild(s);
+  }
+
+  function nextOrFail(msg){
+    if(done) return;
+    if(idx < SOURCES.length - 1 && !failed){ idx++; loadCurrent(); return; }
+    showError(msg);
+  }
+
+  function showError(msg){
+    if(done) return;
+    failed = true; clearDeadline();
+    estadoEl.innerHTML = '';
+    estadoEl.style.color = '#ff6b6b';
+    var span = document.createElement('span');
+    span.textContent = '⚠ ' + (msg || 'No se pudo cargar el motor de visión.') + ' ';
+    var btn = document.createElement('button');
+    btn.textContent = 'Reintentar';
+    btn.className = 'btn ghost';
+    btn.style.cssText = 'width:auto;padding:6px 12px;margin-left:8px;display:inline-block;color:#fff';
+    btn.onclick = retry;
+    estadoEl.appendChild(span); estadoEl.appendChild(btn);
+  }
+
+  function startDeadline(){
+    clearDeadline();
+    deadline = setTimeout(function(){
+      showError('OpenCV tardó demasiado en inicializar (timeout ' + (TIMEOUT_MS/1000) + 's).');
+    }, TIMEOUT_MS);
+  }
+
+  function retry(){
+    idx = 0; done = false; failed = false;
+    estadoEl.style.color = '';
+    startDeadline();
+    loadCurrent();
+  }
+
+  // Arranque
+  startDeadline();
+  loadCurrent();
 })();
 </script>
 </body>
